@@ -1,0 +1,5 @@
+services:
+  meinberg-prometheus:
+    build: .
+    restart: unless-stopped
+    env_file: .env
