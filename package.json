@@ -1,14 +1,14 @@
 {
-    "name": "meinberg-influx",
-    "version": "1.0.0",
-    "description": "Poll Meinberg M1000 clock and send metrics to InfluxDB v2",
+    "name": "meinberg-prometheus",
+    "version": "2.0.0",
+    "description": "Poll Meinberg LANTIME clocks via SNMP and push metrics to Prometheus Pushgateway",
     "main": "index.js",
     "scripts": {
         "start": "node index.js"
     },
     "dependencies": {
-        "@influxdata/influxdb-client": "^1.24.0",
-        "axios": "^1.2.0",
-        "dotenv": "^16.4.7"
+        "dotenv": "^16.4.7",
+        "net-snmp": "^3.11.3",
+        "prom-client": "^15.1.3"
     }
 }

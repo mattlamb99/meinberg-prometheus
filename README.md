@@ -1,135 +1,93 @@
-Below is an example README.md file for your project:
-# Meinberg Influx Monitor
+# Meinberg Clock Monitor
 
-A NodeJS application to poll a Meinberg M1000 clock via its REST API and send key performance metrics to InfluxDB v2. This solution is designed for broadcast facilities using SMPTE-2110 and AES67 networks to ensure high-precision time synchronization.
+A Node.js application that polls Meinberg LANTIME clocks via SNMP and pushes metrics to a Prometheus Pushgateway. Designed for broadcast facilities using SMPTE-2110 and AES67 networks requiring high-precision time synchronization.
 
 ## Overview
 
-This project monitors a Meinberg M1000 clock and extracts essential metrics such as synchronization status, holdover details, uptime, temperature readings, and network health. These metrics are then pushed to an InfluxDB v2 instance for monitoring, alerting, and long-term analysis.
+Polls one or more Meinberg LANTIME devices using SNMP v2c and exposes GPS receiver health, satellite counts, NTP status, and system uptime as Prometheus metrics. Multiple device models are supported and auto-detected at startup.
 
-## Features
+## Supported Models
 
-- **Time Synchronization Monitoring:**  
-  Monitors the sync state, estimated time quality, and holdover metrics.
-- **System Health Metrics:**  
-  Tracks uptime, CPU load, memory status, and temperature sensors.
-- **PTP/NTP Metrics:**  
-  (Extendable) Collects relevant timing and delay values.
-- **Network & Power Status:**  
-  Gathers information on network interfaces and power consumption.
-- **Dockerized Deployment:**  
-  Easily deployable via Docker with all configurations driven by environment variables.
+| Model | MIB | Notes |
+|---|---|---|
+| LANTIME M300, M1000, etc. | LANTIME NG (`.5597.30`) | Full metrics including TDOP/PDOP, UTC offset |
+| RX801 and similar | Meinberg OS (`.5597.7`) | GPS/NTP/satellite metrics; TDOP, PDOP, UTC offset not available in this MIB |
+
+Model detection is automatic — the poller probes each host at startup and selects the correct OID set. No configuration is required. The `model` label (`lantime-ng` or `rx801`) is present on every metric.
+
+## Metrics
+
+All metrics carry `host` and `model` labels.
+
+| Metric | LANTIME NG | RX801 | Description |
+|---|---|---|---|
+| `meinberg_uptime_seconds` | ✓ | ✓ | System uptime — drops to near-zero on reboot |
+| `meinberg_refclock_state` | ✓ | ✓ | 1=synchronized, 2=notSynchronized, 0=notAvailable. Labels: `state`, `substate`, `usage` |
+| `meinberg_gps_satellites_good` | ✓ | ✓ | Good/usable GPS satellites in view |
+| `meinberg_gps_satellites_visible` | ✓ | ✓ | Total GPS satellites in view |
+| `meinberg_gps_altitude_meters` | ✓ | ✓ | GPS antenna altitude in metres |
+| `meinberg_ntp_state` | ✓ | ✓ | 2=synchronized, 1=notSynchronized, 0=notAvailable. Label: `state` |
+| `meinberg_ntp_stratum` | ✓ | ✓ | NTP stratum level |
+| `meinberg_ntp_offset_milliseconds` | ✓ | ✓ | NTP time offset in milliseconds |
+| `meinberg_gps_tdop` | ✓ | — | Timing dilution of precision |
+| `meinberg_gps_pdop` | ✓ | — | Positional dilution of precision |
+| `meinberg_gps_utc_offset_seconds` | ✓ | — | Current leap second count |
+
+### Substate values
+
+The `substate` label on `meinberg_refclock_state` surfaces fine-grained receiver state:
+
+- **LANTIME NG:** `mrsGpsSync`, `gpsTracking`, `gpsAntennaDisconnected`, `gpsColdBoot`, `gpsWarmBoot`, `mrsNtpSync`, `mrsPtpIeee1588Sync`, and others from the MRS state machine
+- **RX801:** `gpsSync`, `gpsTracking`, `gpsColdBoot`, `gpsWarmBoot`, `notAvailable` — or `disconnected`/`shortCircuit` if an antenna fault is detected
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v14+ recommended)
-- [Docker](https://www.docker.com/) (for containerized deployment)
-- Access to a Meinberg M1000 clock with the REST API enabled
-- An InfluxDB v2 instance
+- [Node.js](https://nodejs.org/) v20+
+- SNMP v2c read access to the clock (community string, typically `public`)
+- A running [Prometheus Pushgateway](https://github.com/prometheus/pushgateway)
 
 ## Installation
 
-### Local Setup
+### Local
 
-1. **Clone the Repository:**
+```bash
+git clone https://github.com/yourusername/meinberg-clock-monitor.git
+cd meinberg-clock-monitor
+npm install
+cp .env.example .env
+# edit .env with your values
+npm start
+```
 
-   ```bash
-   git clone https://github.com/yourusername/meinberg-influx-monitor.git
-   cd meinberg-influx-monitor
-   ```
+### Docker
 
-2. **Install Dependencies:**
+```bash
+docker build -t meinberg-clock-monitor .
 
-   ```bash
-   npm install
-   ```
-
-3. **Configure Environment Variables:**
-
-   Create a `.env` file in the project root (or set the variables in your environment) with the following variables:
-
-   ```dotenv
-   CLOCK_ADDRESS=192.168.1.100
-   CLOCK_USERNAME=admin
-   CLOCK_PASSWORD=admin
-   INFLUX_URL=http://influxdb:8086
-   INFLUX_TOKEN=your_influx_token
-   INFLUX_ORG=your_org
-   INFLUX_BUCKET=your_bucket
-   POLL_INTERVAL=60000
-   ```
-
-4. **Start the Application:**
-
-   ```bash
-   npm start
-   ```
-
-### Docker Setup
-
-1. **Build the Docker Image:**
-
-   ```bash
-   docker build -t meinberg-influx .
-   ```
-
-2. **Run the Docker Container:**
-
-   ```bash
-   docker run -d \
-     -e CLOCK_ADDRESS="192.168.1.100" \
-     -e CLOCK_USERNAME="admin" \
-     -e CLOCK_PASSWORD="admin" \
-     -e INFLUX_URL="http://influxdb:8086" \
-     -e INFLUX_TOKEN="your_influx_token" \
-     -e INFLUX_ORG="your_org" \
-     -e INFLUX_BUCKET="your_bucket" \
-     -e POLL_INTERVAL=60000 \
-     meinberg-influx
-   ```
+docker run -d \
+  -e CLOCK_HOSTS="ntp1,ntp2,10.204.32.251" \
+  -e SNMP_COMMUNITY="public" \
+  -e PUSHGATEWAY_URL="http://pushgateway:9091" \
+  -e POLL_INTERVAL=60000 \
+  meinberg-clock-monitor
+```
 
 ## Configuration
 
-- **CLOCK_ADDRESS:** IP address or hostname of the Meinberg M1000 clock.
-- **CLOCK_USERNAME / CLOCK_PASSWORD:** Basic authentication credentials for the clock's REST API.
-- **INFLUX_URL:** URL for your InfluxDB v2 instance.
-- **INFLUX_TOKEN:** InfluxDB authentication token.
-- **INFLUX_ORG:** Your InfluxDB organization name.
-- **INFLUX_BUCKET:** The bucket in InfluxDB where metrics will be stored.
-- **POLL_INTERVAL:** Polling interval in milliseconds (default: 60000).
-
-## Code Structure
-
-- **index.js:**  
-  Contains the logic for polling the clock's API, extracting metrics, and writing data to InfluxDB.
-- **package.json:**  
-  Project configuration and dependency list.
-- **Dockerfile:**  
-  Docker configuration to containerize the application.
-
-## Extending the Application
-
-This application provides a baseline for monitoring key metrics. You can extend it by:
-- Adding more detailed metric extraction from additional sections of the clock's API (e.g., power, network interfaces, notification events).
-- Implementing error handling and alerts based on specific thresholds.
-- Integrating with additional monitoring systems or dashboards.
+| Variable | Default | Description |
+|---|---|---|
+| `CLOCK_HOSTS` | `ntp1,ntp2` | Comma-separated list of clock hostnames or IPs |
+| `SNMP_COMMUNITY` | `public` | SNMP v2c community string |
+| `PUSHGATEWAY_URL` | *(required)* | Pushgateway base URL, e.g. `http://pushgateway:9091` |
+| `POLL_INTERVAL` | `60000` | Poll interval in milliseconds |
 
 ## Troubleshooting
 
-- **Timeouts/Connection Errors:**  
-  Verify that the CLOCK_ADDRESS is correct and that the clock's REST API is accessible.
-- **InfluxDB Write Issues:**  
-  Check your INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, and INFLUX_BUCKET settings.
-- **Authentication Failures:**  
-  Ensure that CLOCK_USERNAME and CLOCK_PASSWORD are correctly configured.
+- **SNMP timeouts:** Verify the clock is reachable and SNMP v2c is enabled with the correct community string.
+- **Pushgateway errors:** Check `PUSHGATEWAY_URL` and that the Pushgateway is running and reachable.
+- **Wrong model detected:** Model detection runs once at startup by probing the LANTIME NG OID. Restart the poller if a device was unreachable at startup.
+- **Missing TDOP/PDOP/UTC offset:** These are not available in the Meinberg OS MIB used by the RX801 — check the `model` label to confirm which MIB is in use.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Axios](https://axios-http.com/) for handling HTTP requests.
-- [InfluxDB Client for JavaScript](https://github.com/influxdata/influxdb-client-js) for InfluxDB integration.
-
----
+MIT
