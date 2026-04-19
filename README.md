@@ -59,7 +59,17 @@ cp .env.example .env
 npm start
 ```
 
-### Docker
+### Docker Compose (recommended)
+
+```bash
+cp .env.example .env
+# edit .env with your values
+docker compose up --build -d
+```
+
+The container is configured with `restart: unless-stopped` so it will survive reboots and automatically recover from transient errors.
+
+### Docker (manual)
 
 ```bash
 docker build -t meinberg-clock-monitor .
@@ -69,6 +79,7 @@ docker run -d \
   -e SNMP_COMMUNITY="public" \
   -e PUSHGATEWAY_URL="http://pushgateway:9091" \
   -e POLL_INTERVAL=60000 \
+  --restart unless-stopped \
   meinberg-clock-monitor
 ```
 
